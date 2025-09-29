@@ -246,9 +246,12 @@ class ThetaController {
             const fileSize = this.formatFileSize(file.size);
             const fileName = file.name;
             
+            // Extract the file path from fileUrl - remove the base URL part
+            const filePath = file.fileUrl ? file.fileUrl.replace(/^https?:\/\/[^\/]+\/files\//, '') : `100RICOH/${fileName}`;
+            
             return `
                 <div class="file-item">
-                    <img src="/api/camera/download/${fileName}?thumb=true" 
+                    <img src="/api/camera/download?path=${encodeURIComponent(filePath)}&thumb=true" 
                          alt="${fileName}" 
                          onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDIwMCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIxNTAiIGZpbGw9IiNmN2ZhZmMiLz48dGV4dCB4PSIxMDAiIHk9Ijc1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTBhZWMwIj5ObyBUaHVtYm5haWw8L3RleHQ+PC9zdmc+'">
                     <h4>${fileName}</h4>
@@ -256,10 +259,10 @@ class ThetaController {
                         ${isVideo ? '📹' : '📸'} ${fileSize} • ${file.dateTime || 'Unknown date'}
                     </div>
                     <div class="file-actions">
-                        <button class="btn btn-secondary" onclick="thetaController.downloadFile('${fileName}', false)">
+                        <button class="btn btn-secondary" onclick="thetaController.downloadFile('${filePath}', false)">
                             Download
                         </button>
-                        <button class="btn btn-secondary" onclick="thetaController.downloadFile('${fileName}', true)">
+                        <button class="btn btn-secondary" onclick="thetaController.downloadFile('${filePath}', true)">
                             Thumb
                         </button>
                     </div>
@@ -272,9 +275,11 @@ class ThetaController {
         this.fileCount.textContent = `${this.files.length} files`;
     }
 
-    async downloadFile(fileName, isThumb = false) {
+    async downloadFile(filePath, isThumb = false) {
         try {
-            const url = `/api/camera/download/${fileName}${isThumb ? '?thumb=true' : ''}`;
+            const params = new URLSearchParams({ path: filePath });
+            if (isThumb) params.set('thumb', 'true');
+            const url = `/api/camera/download?${params}`;
             const response = await fetch(url);
             
             if (response.ok) {
@@ -282,6 +287,7 @@ class ThetaController {
                 const downloadUrl = window.URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = downloadUrl;
+                const fileName = filePath.split('/').pop();
                 link.download = isThumb ? `thumb_${fileName}` : fileName;
                 document.body.appendChild(link);
                 link.click();
@@ -292,6 +298,7 @@ class ThetaController {
             }
         } catch (error) {
             console.error('Download error:', error);
+            const fileName = filePath.split('/').pop();
             alert(`Failed to download ${fileName}: ${error.message}`);
         }
     }

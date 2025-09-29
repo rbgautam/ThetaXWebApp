@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const path = require('path');
 const cors = require('cors');
+const DigestClient = require('digest-fetch');
 
 const app = express();
 const PORT = 5000;
@@ -20,26 +21,41 @@ let cameraConfig = {
     password: ''  // for client mode
 };
 
-// Helper function to create axios config
-function getAxiosConfig() {
+// Helper to make requests with proper auth
+async function makeRequest(method, path, data = null, options = {}) {
     const baseURL = `http://${cameraConfig.ip}:${cameraConfig.port}`;
-    const config = {
-        baseURL,
-        timeout: 10000,
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    };
-
-    // Add digest auth for client mode
+    const url = `${baseURL}${path}`;
+    
     if (cameraConfig.mode === 'client' && cameraConfig.username && cameraConfig.password) {
-        config.auth = {
-            username: cameraConfig.username,
-            password: cameraConfig.password
+        // Use digest auth for client mode
+        const client = new DigestClient(cameraConfig.username, cameraConfig.password);
+        const requestOptions = {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            ...options
         };
+        
+        if (data) {
+            requestOptions.body = typeof data === 'string' ? data : JSON.stringify(data);
+        }
+        
+        return await client.fetch(url, requestOptions);
+    } else {
+        // Use axios for access point mode
+        const config = {
+            method,
+            url,
+            timeout: 10000,
+            headers: { 'Content-Type': 'application/json' },
+            ...options
+        };
+        
+        if (data) {
+            config.data = data;
+        }
+        
+        return await axios(config);
     }
-
-    return config;
 }
 
 // API Routes
@@ -65,9 +81,9 @@ app.post('/api/config', (req, res) => {
 // Get camera info
 app.get('/api/camera/info', async (req, res) => {
     try {
-        const axiosConfig = getAxiosConfig();
-        const response = await axios.get('/osc/info', axiosConfig);
-        res.json(response.data);
+        const response = await makeRequest('GET', '/osc/info');
+        const data = response.data || await response.json();
+        res.json(data);
     } catch (error) {
         console.error('Error getting camera info:', error.message);
         res.status(500).json({ 
@@ -80,14 +96,13 @@ app.get('/api/camera/info', async (req, res) => {
 // Take picture
 app.post('/api/camera/take-picture', async (req, res) => {
     try {
-        const axiosConfig = getAxiosConfig();
-        
         // Start taking picture
-        const takeResponse = await axios.post('/osc/commands/execute', {
+        const takeResponse = await makeRequest('POST', '/osc/commands/execute', {
             name: 'camera.takePicture'
-        }, axiosConfig);
+        });
         
-        const commandId = takeResponse.data.id;
+        const takeData = takeResponse.data || await takeResponse.json();
+        const commandId = takeData.id;
         
         // Poll for completion
         let completed = false;
@@ -97,17 +112,19 @@ app.post('/api/camera/take-picture', async (req, res) => {
         while (!completed && attempts < maxAttempts) {
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
             
-            const statusResponse = await axios.post('/osc/commands/status', {
+            const statusResponse = await makeRequest('POST', '/osc/commands/status', {
                 id: commandId
-            }, axiosConfig);
+            });
             
-            if (statusResponse.data.state === 'done') {
+            const statusData = statusResponse.data || await statusResponse.json();
+            
+            if (statusData.state === 'done') {
                 completed = true;
                 res.json({
                     success: true,
-                    fileUrl: statusResponse.data.results?.fileUrl || null
+                    fileUrl: statusData.results?.fileUrl || null
                 });
-            } else if (statusResponse.data.state === 'error') {
+            } else if (statusData.state === 'error') {
                 throw new Error('Picture capture failed');
             }
             
@@ -130,10 +147,9 @@ app.post('/api/camera/take-picture', async (req, res) => {
 // List files
 app.get('/api/camera/files', async (req, res) => {
     try {
-        const axiosConfig = getAxiosConfig();
         const { fileType = 'all', startPosition = 0, entryCount = 20 } = req.query;
         
-        const response = await axios.post('/osc/commands/execute', {
+        const response = await makeRequest('POST', '/osc/commands/execute', {
             name: 'camera.listFiles',
             parameters: {
                 fileType,
@@ -142,9 +158,10 @@ app.get('/api/camera/files', async (req, res) => {
                 maxThumbSize: 0,
                 _detail: false
             }
-        }, axiosConfig);
+        });
         
-        res.json(response.data.results);
+        const data = response.data || await response.json();
+        res.json(data.results);
     } catch (error) {
         console.error('Error listing files:', error.message);
         res.status(500).json({ 
@@ -154,29 +171,52 @@ app.get('/api/camera/files', async (req, res) => {
     }
 });
 
-// Download file
-app.get('/api/camera/download/*', async (req, res) => {
+// Download file with dynamic path handling using query parameter
+app.get('/api/camera/download', async (req, res) => {
     try {
-        const fileUrl = req.params[0];
+        const filePath = req.query.path; // Get the path from query parameter
         const isThumb = req.query.thumb === 'true';
         
-        const axiosConfig = getAxiosConfig();
-        axiosConfig.responseType = 'stream';
+        if (!filePath) {
+            return res.status(400).json({ error: 'File path is required' });
+        }
         
-        let url = `/files/${fileUrl}`;
+        let url = `/files/${filePath}`;
         if (isThumb) {
             url += '?type=thumb';
         }
         
-        const response = await axios.get(url, axiosConfig);
+        if (cameraConfig.mode === 'client' && cameraConfig.username && cameraConfig.password) {
+            // Handle digest auth download
+            const client = new DigestClient(cameraConfig.username, cameraConfig.password);
+            const fullUrl = `http://${cameraConfig.ip}:${cameraConfig.port}${url}`;
+            const response = await client.fetch(fullUrl);
+            
+            // Set headers
+            res.set({
+                'Content-Type': response.headers.get('content-type') || 'application/octet-stream'
+            });
+            
+            const buffer = await response.arrayBuffer();
+            res.send(Buffer.from(buffer));
+            
+        } else {
+            // Handle access point mode download
+            const response = await axios.get(url, {
+                baseURL: `http://${cameraConfig.ip}:${cameraConfig.port}`,
+                responseType: 'stream',
+                timeout: 30000
+            });
+            
+            // Set appropriate headers
+            res.set({
+                'Content-Type': response.headers['content-type'] || 'application/octet-stream',
+                'Content-Length': response.headers['content-length']
+            });
+            
+            response.data.pipe(res);
+        }
         
-        // Set appropriate headers
-        res.set({
-            'Content-Type': response.headers['content-type'] || 'application/octet-stream',
-            'Content-Length': response.headers['content-length']
-        });
-        
-        response.data.pipe(res);
     } catch (error) {
         console.error('Error downloading file:', error.message);
         res.status(500).json({ 
@@ -189,26 +229,73 @@ app.get('/api/camera/download/*', async (req, res) => {
 // Live preview stream
 app.get('/api/camera/preview', async (req, res) => {
     try {
-        const axiosConfig = getAxiosConfig();
-        axiosConfig.responseType = 'stream';
-        
-        const response = await axios.post('/osc/commands/execute', {
-            name: 'camera.getLivePreview'
-        }, axiosConfig);
-        
-        // Set headers for MJPEG stream
-        res.set({
-            'Content-Type': 'multipart/x-mixed-replace; boundary="---osclivepreview---"',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive'
-        });
-        
-        response.data.pipe(res);
-        
-        // Handle client disconnect
-        req.on('close', () => {
-            response.data.destroy();
-        });
+        if (cameraConfig.mode === 'client' && cameraConfig.username && cameraConfig.password) {
+            // Handle client mode preview with digest auth
+            const client = new DigestClient(cameraConfig.username, cameraConfig.password);
+            const url = `http://${cameraConfig.ip}:${cameraConfig.port}/osc/commands/execute`;
+            const response = await client.fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'camera.getLivePreview' })
+            });
+            
+            // Forward headers
+            res.set({
+                'Content-Type': response.headers.get('content-type') || 'multipart/x-mixed-replace; boundary="---osclivepreview---"',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive'
+            });
+            
+            // Pipe the response
+            const reader = response.body.getReader();
+            
+            const pump = async () => {
+                try {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        res.end();
+                        return;
+                    }
+                    res.write(Buffer.from(value));
+                    await pump();
+                } catch (error) {
+                    console.error('Preview stream error:', error);
+                    res.end();
+                }
+            };
+            
+            await pump();
+            
+        } else {
+            // Handle access point mode preview
+            const response = await axios.post('/osc/commands/execute', {
+                name: 'camera.getLivePreview'
+            }, {
+                baseURL: `http://${cameraConfig.ip}:${cameraConfig.port}`,
+                responseType: 'stream',
+                timeout: 0 // No timeout for streaming
+            });
+            
+            // Forward the camera's headers, especially Content-Type with correct boundary
+            res.set({
+                'Content-Type': response.headers['content-type'] || 'multipart/x-mixed-replace; boundary="---osclivepreview---"',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive'
+            });
+            
+            response.data.pipe(res);
+            
+            // Handle client disconnect
+            req.on('close', () => {
+                response.data.destroy();
+            });
+            
+            // Handle stream errors
+            response.data.on('error', (error) => {
+                console.error('Preview stream error:', error);
+                res.end();
+            });
+        }
         
     } catch (error) {
         console.error('Error starting live preview:', error.message);
