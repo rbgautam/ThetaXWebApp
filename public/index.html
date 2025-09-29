@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ricoh Theta X Controller</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎥 Ricoh Theta X Controller</h1>
+            <p>Control your Theta X camera and view 360° content</p>
+        </header>
+
+        <!-- Camera Configuration -->
+        <section class="config-section">
+            <h2>📡 Camera Configuration</h2>
+            <div class="config-form">
+                <div class="form-group">
+                    <label for="cameraMode">Connection Mode:</label>
+                    <select id="cameraMode">
+                        <option value="access_point">Access Point Mode (192.168.1.1)</option>
+                        <option value="client">Client Mode (Custom IP)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="ipGroup">
+                    <label for="cameraIP">Camera IP Address:</label>
+                    <input type="text" id="cameraIP" value="192.168.1.1" placeholder="192.168.1.1">
+                </div>
+
+                <div class="form-group" id="portGroup">
+                    <label for="cameraPort">Port:</label>
+                    <input type="number" id="cameraPort" value="80" placeholder="80">
+                </div>
+
+                <div id="clientModeFields" style="display: none;">
+                    <div class="form-group">
+                        <label for="username">Username (THETA + Serial):</label>
+                        <input type="text" id="username" placeholder="THETAYR15104645">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password (Serial Number):</label>
+                        <input type="password" id="password" placeholder="15104645">
+                    </div>
+                </div>
+
+                <button id="updateConfig" class="btn btn-primary">Update Configuration</button>
+                <button id="testConnection" class="btn btn-secondary">Test Connection</button>
+            </div>
+
+            <div id="connectionStatus" class="status-message"></div>
+        </section>
+
+        <!-- Live Preview -->
+        <section class="preview-section">
+            <h2>📹 Live Preview</h2>
+            <div class="preview-container">
+                <img id="livePreview" src="" alt="Live Preview" style="display: none;">
+                <div id="previewPlaceholder" class="preview-placeholder">
+                    <p>Click "Start Preview" to begin live streaming</p>
+                </div>
+                <div class="preview-controls">
+                    <button id="startPreview" class="btn btn-primary">Start Preview</button>
+                    <button id="stopPreview" class="btn btn-secondary" style="display: none;">Stop Preview</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Camera Controls -->
+        <section class="controls-section">
+            <h2>📸 Camera Controls</h2>
+            <div class="controls">
+                <button id="takePicture" class="btn btn-primary btn-large">Take Picture</button>
+                <button id="refreshFiles" class="btn btn-secondary">Refresh Files</button>
+            </div>
+            <div id="captureStatus" class="status-message"></div>
+        </section>
+
+        <!-- File Gallery -->
+        <section class="gallery-section">
+            <h2>🖼️ Camera Files</h2>
+            <div class="gallery-controls">
+                <select id="fileTypeFilter">
+                    <option value="all">All Files</option>
+                    <option value="image">Images Only</option>
+                    <option value="video">Videos Only</option>
+                </select>
+                <span id="fileCount">0 files</span>
+            </div>
+            <div id="gallery" class="gallery">
+                <div class="gallery-placeholder">
+                    <p>Click "Refresh Files" to load camera contents</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
